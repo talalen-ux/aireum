@@ -5,6 +5,9 @@ import { createAdapters } from "../adapters";
 import { Simulator } from "../sim/simulator";
 import { Engine } from "./engine";
 import { loadHistory } from "./history";
+import { fetchDvol } from "./dvol";
+
+let dvolTimer: ReturnType<typeof setInterval> | null = null;
 
 export type WorkerIn =
   | { type: "start"; asset: Asset; mode: Exclude<DataMode, "replay">; venues?: Venue[] }
@@ -37,6 +40,8 @@ function stopAll() {
   loop = null;
   if (replayTimer) clearTimeout(replayTimer);
   replayTimer = null;
+  if (dvolTimer) clearInterval(dvolTimer);
+  dvolTimer = null;
   engine = null;
 }
 
@@ -81,6 +86,9 @@ ctx.onmessage = async (ev: MessageEvent<WorkerIn>) => {
         if (gen !== my) return;
         e.loadHistory(h.bars, { source: h.source, flowAvailable: h.flowAvailable, errors: h.errors });
       }).catch((err) => post({ type: "error", message: `history: ${(err as Error).message}` }));
+      const pullDvol = () => fetchDvol(m.asset).then((d) => gen === my && e.setDvol(d));
+      pullDvol();
+      dvolTimer = setInterval(pullDvol, 5 * 60_000);
     }
     return;
   }

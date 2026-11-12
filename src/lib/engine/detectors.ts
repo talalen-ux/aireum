@@ -6,6 +6,9 @@ import { evaluateExhaustion, historicalAnalogs, type AnalogStats, type BookPress
 import type { TfAssessment } from "./regime";
 import type { LiqMap } from "./liqmodel";
 import type { VenueRow, LeadLag } from "./micro";
+import type { DvolResult } from "./dvol";
+import { aggregateVol } from "./dvol";
+import { detect2B, williamsVixFix, wvfState, type TwoB } from "./technicals";
 
 export type DetectorId =
   | "liquidation_exhaustion"
@@ -21,7 +24,9 @@ export type DetectorId =
   | "cross_venue_dislocation"
   | "options_hedging_event"
   | "macro_shock"
-  | "liquidity_vacuum";
+  | "liquidity_vacuum"
+  | "price_2b"
+  | "vix_2b";
 
 export const DETECTOR_LABEL: Record<DetectorId, string> = {
   liquidation_exhaustion: "Liquidity exhaustion",
@@ -38,6 +43,8 @@ export const DETECTOR_LABEL: Record<DetectorId, string> = {
   options_hedging_event: "Options hedging event",
   macro_shock: "Macro shock",
   liquidity_vacuum: "Liquidity vacuum",
+  price_2b: "2B reversal (price)",
+  vix_2b: "VIX 2B (volatility)",
 };
 
 export interface Opportunity {
@@ -84,6 +91,7 @@ export interface DetectorContext {
   analogCache: Map<string, AnalogStats>;
   optionsAvailable: boolean;
   macroAvailable: boolean;
+  dvol?: DvolResult | null;
 }
 
 type Candidate = Omit<Opportunity, "key" | "firstSeen" | "updated" | "firstPrice" | "state"> & { state?: Lifecycle };
@@ -368,6 +376,80 @@ function vacuumDetector(ctx: DetectorContext): Candidate[] {
   }
 }
 
+const TWO_B_TFS: Timeframe[] = ["15m", "1h", "4h"];
+
+function twoBPriceDetector(ctx: DetectorContext): Candidate[] {
+  const out: Candidate[] = [];
+  for (const tf of TWO_B_TFS) {
+    const bars = ctx.bars[tf] ?? [];
+    if (bars.length < 60) continue;
+    const sigs = detect2B(bars.slice(-300));
+    const live = sigs.filter((x) => x.state === "confirmed" && x.barsAgo <= 3).at(-1);
+    if (!live) continue;
+    const top = live.kind === "top";
+    const side: Side = top ? "short" : "long";
+    const ts = bars[bars.length - 1].t;
+    const pen = Math.abs(live.extreme - live.trigger);
+    const a = atr(bars, 14) ?? pen;
+    out.push({
+      detector: "price_2b", side, tf, strength: clamp(0.4 + Math.min(0.25, pen / a * 0.15) + (live.barsAgo === 0 ? 0.1 : 0), 0, 0.8), completeness: 1,
+      thesis: top
+        ? `2B top: price pushed above the prior ${tf} swing high (${live.trigger.toFixed(1)}) and closed back below it — the breakout failed to attract follow-through.`
+        : `2B bottom: price pushed below the prior ${tf} swing low (${live.trigger.toFixed(1)}) and closed back above it — the breakdown failed to attract follow-through.`,
+      evidence: [
+        ev("Prior swing " + (top ? "high" : "low"), `${live.trigger.toFixed(1)} @ ${new Date(live.pivot.t).toISOString().slice(5, 16)}`, 0, "observed", `${tf} pivots (k=3)`, ts),
+        ev("False-break extreme", `${live.extreme.toFixed(1)} (${(pen / a).toFixed(2)}×ATR beyond)`, 1, "observed", `${tf} bars`, ts),
+        ev("Failure close", `${live.barsAgo} bar(s) ago`, 1, "observed", `${tf} bars`, ts),
+      ],
+      counter: [ev("2B is a pattern, not proof", "many 2Bs are followed by a second, successful breakout", -1, "inferred", "methodology", ts)],
+      zone: top ? [live.trigger, live.extreme] : [live.extreme, live.trigger], trigger: live.trigger, invalidation: live.invalidation,
+      targets: targetsFor(side, bars[bars.length - 1].c, ctx.liq),
+      analogs: null,
+      assumptions: ["Sperandeo 2B: break of the last confirmed swing pivot (fractal k=3) and close back inside within 3 bars.", "Invalidation = false-break extreme ± 0.1×ATR."],
+    });
+  }
+  return out;
+}
+
+function vix2BDetector(ctx: DetectorContext): Candidate[] {
+  const out: Candidate[] = [];
+  const price = ctx.price;
+  if (!price) return out;
+  const sources: { tf: Timeframe; series: { t: number; h: number; l: number; c: number }[]; name: string; prov: "observed" | "modeled" }[] = [];
+  if (ctx.dvol?.status === "ok") {
+    sources.push({ tf: "1h", series: ctx.dvol.h1, name: "DVOL (Deribit implied vol)", prov: "observed" });
+    sources.push({ tf: "4h", series: aggregateVol(ctx.dvol.h1, 4), name: "DVOL (Deribit implied vol)", prov: "observed" });
+  } else {
+    for (const tf of ["1h", "4h"] as Timeframe[]) {
+      const bars = ctx.bars[tf] ?? [];
+      if (bars.length >= 80) sources.push({ tf, series: williamsVixFix(bars.slice(-300)), name: "Williams VIX Fix (price-derived)", prov: "modeled" });
+    }
+  }
+  for (const src of sources) {
+    const sigs: TwoB[] = detect2B(src.series);
+    const live = sigs.filter((x) => x.kind === "top" && x.state === "confirmed" && x.barsAgo <= 2).at(-1);
+    if (!live) continue;
+    const ts = src.series[src.series.length - 1].t;
+    const st = src.name.startsWith("Williams") ? wvfState(src.series as never) : null;
+    out.push({
+      detector: "vix_2b", side: "long", tf: src.tf, strength: 0.55, completeness: src.prov === "observed" ? 1 : 0.75,
+      thesis: `VIX 2B top on ${src.name}: volatility spiked above its prior swing high (${live.trigger.toFixed(1)}) and immediately fell back — the fear spike failed to extend. Historically this tends to mark relief rather than further panic.`,
+      evidence: [
+        ev(`${src.tf} vol swing high`, live.trigger.toFixed(2), 0, src.prov, src.name, ts),
+        ev("Spike extreme", live.extreme.toFixed(2), 1, src.prov, src.name, ts),
+        ev("Back below swing high", `${live.barsAgo} bar(s) ago`, 1, src.prov, src.name, ts),
+        ...(st ? [ev("WVF percentile (500 bars)", `${Math.round(st.percentile * 100)}%`, 0, "modeled", "WVF", ts) as Evidence] : []),
+      ],
+      counter: [ev("Vol can re-spike", "a second higher vol high invalidates the 2B", -1, "inferred", "methodology", ts), ev("Equity-VIX heuristic", "transfer to crypto vol is unvalidated", -1, "inferred", "methodology", ts)],
+      zone: null, trigger: null, invalidation: null,
+      targets: targetsFor("long", price, ctx.liq),
+      analogs: null,
+      assumptions: [`Volatility 2B invalidates if ${src.name} exceeds ${live.invalidation.toFixed(2)}.`, src.prov === "modeled" ? "DVOL unavailable — using the Williams VIX Fix computed from price bars." : "DVOL is Deribit's 30-day implied volatility index."],
+    });
+  }
+  return out;
+}
+
 export function detectorStatus(ctx: DetectorContext): DetectorStatus[] {
   const hasBook = ctx.venues.some((v) => v.state === "live" && v.levels > 0);
   return [
@@ -385,6 +467,8 @@ export function detectorStatus(ctx: DetectorContext): DetectorStatus[] {
     { id: "options_hedging_event", available: ctx.optionsAvailable, reason: "see Options panel (Deribit chain); engine hook pending validation" },
     { id: "macro_shock", available: ctx.macroAvailable, reason: "no licensed macro/news feed connected" },
     { id: "liquidity_vacuum", available: hasBook && ctx.depthHist.length >= 60, reason: "needs ≥60s of live books" },
+    { id: "price_2b", available: (ctx.bars["15m"]?.length ?? 0) >= 60 },
+    { id: "vix_2b", available: ctx.dvol?.status === "ok" || (ctx.bars["1h"]?.length ?? 0) >= 80, reason: ctx.dvol?.status === "ok" ? undefined : "DVOL unavailable → Williams VIX Fix fallback" },
   ];
 }
 
@@ -398,6 +482,8 @@ export function runDetectors(ctx: DetectorContext): Candidate[] {
     ...divergenceDetectors(ctx),
     ...dislocationDetector(ctx),
     ...vacuumDetector(ctx),
+    ...twoBPriceDetector(ctx),
+    ...vix2BDetector(ctx),
   ];
 }
 

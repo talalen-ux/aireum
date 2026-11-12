@@ -12,6 +12,10 @@ export interface ChartOverlay {
   opportunity?: Opportunity | null;
   walls?: WallInfo[];
   liqClusters?: { price: number; side: "long" | "short"; usd: number }[];
+  /** straight line segments (e.g. Gann fan angles) drawn on the price pane */
+  segments?: { id: string; color: string; width?: number; dashed?: boolean; points: { t: number; v: number }[] }[];
+  /** 2B markers on the candles */
+  markers?: { t: number; position: "aboveBar" | "belowBar"; color: string; text: string }[];
 }
 
 /**
@@ -24,6 +28,8 @@ export function PriceChart({ bars, overlay, height = 420 }: { bars: Bar[]; overl
   const chart = useRef<IChartApi | null>(null);
   const s = useRef<{ candle: ISeriesApi<"Candlestick">; spot: ISeriesApi<"Histogram">; perp: ISeriesApi<"Histogram">; oi: ISeriesApi<"Line">; markers: ISeriesMarkersPluginApi<Time> } | null>(null);
   const lines = useRef<IPriceLine[]>([]);
+  const segs = useRef<ISeriesApi<"Line">[]>([]);
+  const liqMk = useRef<{ time: Time; position: "aboveBar" | "belowBar"; shape: "circle" | "arrowUp" | "arrowDown"; color: string; size: number; text: string }[]>([]);
   const fitted = useRef(false);
 
   useEffect(() => {
@@ -68,7 +74,9 @@ export function PriceChart({ bars, overlay, height = 420 }: { bars: Bar[]; overl
         return { time: t(b), position: long ? ("belowBar" as const) : ("aboveBar" as const), shape: "circle" as const, color: long ? C.bear : C.bull, size: 0.6, text: "" };
       })
       .slice(-80);
-    x.markers.setMarkers(mk);
+    liqMk.current = mk;
+    const extra = (overlay?.markers ?? []).map((m) => ({ time: (m.t / 1000) as UTCTimestamp as Time, position: m.position, shape: (m.position === "aboveBar" ? "arrowDown" : "arrowUp") as "arrowDown" | "arrowUp", color: m.color, size: 1, text: m.text }));
+    x.markers.setMarkers([...mk, ...extra].sort((a, b) => (a.time as number) - (b.time as number)));
     if (!fitted.current) { chart.current?.timeScale().fitContent(); fitted.current = true; }
   }, [bars]);
 
@@ -87,6 +95,22 @@ export function PriceChart({ bars, overlay, height = 420 }: { bars: Bar[]; overl
     for (const w of overlay?.walls?.slice(0, 4) ?? []) add(w.price, w.side === "bid" ? "rgba(49,185,150,0.45)" : "rgba(214,108,120,0.45)", `wall ${(w.usd / 1e6).toFixed(1)}M OBS`, 1);
     for (const c of overlay?.liqClusters?.slice(0, 2) ?? []) add(c.price, C.model, `liq ${c.side} ~${(c.usd / 1e6).toFixed(0)}M MODEL`, 1);
   }, [overlay?.opportunity, overlay?.walls, overlay?.liqClusters]);
+
+  useEffect(() => {
+    const c = chart.current, x = s.current;
+    if (!c || !x) return;
+    for (const l of segs.current) c.removeSeries(l);
+    segs.current = [];
+    for (const sg of overlay?.segments ?? []) {
+      const pts = [...sg.points].sort((a, b) => a.t - b.t).filter((p, i, arr) => i === 0 || p.t > arr[i - 1].t);
+      if (pts.length < 2) continue;
+      const ls = c.addSeries(LineSeries, { color: sg.color, lineWidth: (sg.width ?? 1) as 1, lineStyle: sg.dashed ? 2 : 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null }, 0);
+      ls.setData(pts.map((p) => ({ time: (p.t / 1000) as UTCTimestamp, value: p.v })));
+      segs.current.push(ls);
+    }
+    const extra = (overlay?.markers ?? []).map((m) => ({ time: (m.t / 1000) as UTCTimestamp as Time, position: m.position, shape: (m.position === "aboveBar" ? "arrowDown" : "arrowUp") as "arrowDown" | "arrowUp", color: m.color, size: 1, text: m.text }));
+    x.markers.setMarkers([...liqMk.current, ...extra].sort((a, b) => (a.time as number) - (b.time as number)));
+  }, [overlay?.segments, overlay?.markers]);
 
   return <div ref={el} style={{ height }} className="w-full" />;
 }

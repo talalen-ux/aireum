@@ -4,8 +4,9 @@ import { create } from "zustand";
 import type { Asset, DataMode, Timeframe } from "../core/types";
 import type { EngineSnapshot, HeatColumn } from "../engine/engine";
 import type { Bar } from "../engine/bars";
+import type { DvolResult } from "../engine/dvol";
 
-export type View = "command" | "liquidity" | "flow" | "radar" | "options" | "tradelab" | "analyst" | "macro" | "journal" | "system";
+export type View = "command" | "liquidity" | "flow" | "radar" | "technicals" | "options" | "tradelab" | "analyst" | "macro" | "journal" | "system";
 
 interface State {
   asset: Asset;
@@ -17,6 +18,7 @@ interface State {
   bars1m: Bar[];
   heat: HeatColumn[];
   heatStep: number;
+  dvol: DvolResult | null;
   error: string | null;
   lastSnapAt: number;
   setAsset(a: Asset): void;
@@ -38,6 +40,7 @@ export const useAtlas = create<State>((set, get) => ({
   bars1m: [],
   heat: [],
   heatStep: 0,
+  dvol: null,
   error: null,
   lastSnapAt: 0,
   setAsset: (asset) => set({ asset }),
@@ -45,7 +48,7 @@ export const useAtlas = create<State>((set, get) => ({
   setView: (view) => set({ view }),
   setChartTf: (chartTf) => set({ chartTf }),
   setError: (error) => set({ error }),
-  reset: () => set({ snap: null, chartBars: {}, bars1m: [], heat: [], heatStep: 0, error: null }),
+  reset: () => set({ snap: null, chartBars: {}, bars1m: [], heat: [], heatStep: 0, dvol: null, error: null }),
   ingest: (s) => {
     const st = get();
     let heat = st.heat;
@@ -57,6 +60,7 @@ export const useAtlas = create<State>((set, get) => ({
       heatStep: s.heat.step || st.heatStep,
       chartBars: Object.keys(s.chartBars).length ? s.chartBars : st.chartBars,
       bars1m: s.bars1m.length ? s.bars1m : st.bars1m,
+      dvol: s.dvol ?? st.dvol,
       lastSnapAt: Date.now(),
     });
   },

@@ -8,6 +8,7 @@ import { assessTimeframe, type TfAssessment } from "./regime";
 import { evaluateExhaustion, type BookPressure, type ExhaustionSignal, type AnalogStats } from "./exhaustion";
 import { buildLiqMap, niceStep, type LiqMap } from "./liqmodel";
 import { ImpactTracker, LargeTrades, Stream, WallTracker, computeLeadLag, sampleStream, streamKey, venueRow, type LeadLag, type VenueRow, type WallInfo } from "./micro";
+import type { DvolResult } from "./dvol";
 import { OpportunityBook, detectorStatus, refreshAnalogs, runDetectors, type AuditEntry, type DetectorContext, type DetectorStatus, type Opportunity } from "./detectors";
 
 export interface HeatColumn {
@@ -67,6 +68,7 @@ export interface EngineSnapshot {
   eventsPerSec: number;
   recording: boolean;
   recordedEvents: number;
+  dvol: DvolResult | null;
 }
 
 const SPOT_PRIORITY: Venue[] = ["binance", "coinbase", "okx", "bybit", "kraken", "bitfinex", "kucoin", "sim"];
@@ -107,6 +109,12 @@ export class Engine {
   history = { source: "pending", flowAvailable: false, errors: [] as string[], loaded: false };
   recording = false;
   recorded: AnyEvent[] = [];
+  dvol: DvolResult | null = null;
+  private dvolSentAt = -1;
+
+  setDvol(d: DvolResult) {
+    this.dvol = d;
+  }
 
   constructor(readonly asset: Asset, readonly mode: DataMode, now = Date.now()) {
     this.clock = now;
@@ -290,7 +298,7 @@ export class Engine {
       this.exh = { long: evaluateExhaustion(src, "long", use1m ? bp : null), short: evaluateExhaustion(src, "short", use1m ? bp : null), tf: use1m ? "1m" : "5m" };
       const venues = this.venueRows(now);
       const ctx: DetectorContext = {
-        now, price, bars1m: this.bars1m.bars, bars: Object.fromEntries(TIMEFRAMES.map((tf) => [tf, this.series[tf].bars])), assess: this.assessments, book: bp, venues, leadLag: this.leadLag, liq: this.liqMap, depthHist: this.depthHist, analogCache: this.analogCache, optionsAvailable: false, macroAvailable: false,
+        now, price, bars1m: this.bars1m.bars, bars: Object.fromEntries(TIMEFRAMES.map((tf) => [tf, this.series[tf].bars])), assess: this.assessments, book: bp, venues, leadLag: this.leadLag, liq: this.liqMap, depthHist: this.depthHist, analogCache: this.analogCache, optionsAvailable: false, macroAvailable: false, dvol: this.dvol,
       };
       this.opp.update(runDetectors(ctx), now, price);
       this.detStatus = detectorStatus(ctx);
@@ -396,6 +404,12 @@ export class Engine {
 
   private heatCursor = 0;
 
+  private dvolPayload(force: boolean): DvolResult | null {
+    if (!this.dvol) return null;
+    if (force || this.dvol.asOf !== this.dvolSentAt) { this.dvolSentAt = this.dvol.asOf; return this.dvol; }
+    return null;
+  }
+
   snapshot(opts: { includeChart: boolean; resetHeat?: boolean }): EngineSnapshot {
     const now = this.now();
     const venues = this.venueRows(now);
@@ -425,6 +439,7 @@ export class Engine {
       liqMap: this.liqMap, exhaustion: this.exh, analogs: Object.fromEntries(this.analogCache), opportunities: this.opp.list(), recentOpportunities: this.opp.recent.slice(0, 15), detectors: this.detStatus, audit: this.opp.audit.slice(0, 60),
       heat: { step: this.heatStep ?? 0, cols }, bookPressure: this.bookPressure(), aggDepth: this.aggDepth(), oiTotalUsd: this.oiTotalUsd(), fundingAvg8h: this.fundingAvg(),
       atr1m: atr(b1, 14), atr5m: atr(this.series["5m"].bars, 14), returns1m: rets, eventsPerSec: this.evRate, recording: this.recording, recordedEvents: this.recorded.length,
+      dvol: this.dvolPayload(opts.includeChart),
     };
   }
 }
