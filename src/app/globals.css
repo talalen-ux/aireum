@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b1016;
+  --color-card: #151d26;
+  --color-elev: #1c2732;
+  --color-line: #243241;
+  --color-fg: #f2f5f7;
+  --color-dim: #94a3b2;
+  --color-mute: #5f6f7f;
+  --color-bull: #31b996;
+  --color-bear: #d66c78;
+  --color-warn: #d9aa65;
+  --color-info: #6aa3d9;
+  --color-model: #a58be0; /* modeled values */
+  --color-infer: #d98fc1; /* inferred values */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1, "cv11" 1, "ss01" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a3a4a transparent;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes flash-up {
+  from {
+    background: rgba(49, 185, 150, 0.25);
+  }
+  to {
+    background: transparent;
+  }
+}
+@keyframes flash-down {
+  from {
+    background: rgba(214, 108, 120, 0.25);
+  }
+  to {
+    background: transparent;
+  }
+}
+.flash-up {
+  animation: flash-up 0.6s ease-out;
+}
+.flash-down {
+  animation: flash-down 0.6s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot,
+  .flash-up,
+  .flash-down {
+    animation: none;
+  }
+}
