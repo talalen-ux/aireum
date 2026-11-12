@@ -214,10 +214,10 @@ function squeezeDetector(ctx: DetectorContext): Candidate[] {
     // crowded longs: high funding/basis, rising OI, momentum stalling → long squeeze risk → SHORT hypothesis
     const longCrowd = (fz + bz) / 2;
     if (longCrowd > 1.2 && oz > 0 && mz < 0.8) {
-      out.push(sq("long_squeeze", "short", tf, squash((longCrowd - 1.2) * 1.5 + oz * 0.3), ts, f, "Longs are paying up (funding/basis elevated) while OI builds and price stalls — crowded longs are vulnerable to a cascade if support fails."));
+      out.push(sq("long_squeeze", "short", tf, 0.9 * squash((longCrowd - 1.2) * 0.8 + Math.min(oz, 2) * 0.3), ts, f, "Longs are paying up (funding/basis elevated) while OI builds and price stalls — crowded longs are vulnerable to a cascade if support fails."));
     }
     if (longCrowd < -1.2 && oz > 0 && mz > -0.8) {
-      out.push(sq("short_squeeze", "long", tf, squash((-longCrowd - 1.2) * 1.5 + oz * 0.3), ts, f, "Shorts are paying (negative funding/basis) while OI builds and price holds — crowded shorts are vulnerable to a squeeze if resistance breaks."));
+      out.push(sq("short_squeeze", "long", tf, 0.9 * squash((-longCrowd - 1.2) * 0.8 + Math.min(oz, 2) * 0.3), ts, f, "Shorts are paying (negative funding/basis) while OI builds and price holds — crowded shorts are vulnerable to a squeeze if resistance breaks."));
     }
   }
   return out;
@@ -327,10 +327,12 @@ function dislocationDetector(ctx: DetectorContext): Candidate[] {
   for (const r of rows) {
     if (Math.abs(r.dislocationBps!) < thr) continue;
     const isLeader = ctx.leadLag?.leader === r.key;
+    // A laggard's dislocation says nothing about market direction (it is venue-specific), so it emits no hypothesis.
+    if (!isLeader) continue;
     const side: Side = r.dislocationBps! > 0 ? "long" : "short";
     const ts = ctx.now;
     out.push({
-      detector: "cross_venue_dislocation", side, tf: "1m", strength: clamp((Math.abs(r.dislocationBps!) / thr - 1) * 0.4 + (isLeader ? 0.35 : 0.1), 0, 1), completeness: 1,
+      detector: "cross_venue_dislocation", side, tf: "1m", strength: clamp((Math.abs(r.dislocationBps!) / thr - 1) * 0.4 + 0.3, 0, 0.85), completeness: 1,
       thesis: isLeader
         ? `${r.venue} ${r.market} — the current lead venue — is trading ${r.dislocationBps! > 0 ? "above" : "below"} the cross-venue median; laggards have historically tended to follow the leader.`
         : `${r.venue} ${r.market} is dislocated from the cross-venue median; without lead status this more often mean-reverts (venue-specific flow).`,
@@ -415,7 +417,7 @@ export class OpportunityBook {
   recent: Opportunity[] = [];
   audit: AuditEntry[] = [];
 
-  update(cands: Candidate[], now: number, price: number | null, ttlMs = 15 * 60_000): Opportunity[] {
+  update(cands: Candidate[], now: number, price: number | null, ttlMs = 90_000): Opportunity[] {
     const seen = new Set<string>();
     for (const c of cands) {
       const key = `${c.detector}:${c.side}:${c.tf}`;

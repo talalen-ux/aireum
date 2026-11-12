@@ -139,7 +139,8 @@ export function Tabs<T extends string>({ value, onChange, items }: { value: T; o
 export const fmt = {
   px(v: number | null | undefined, d?: number) {
     if (v === null || v === undefined || !Number.isFinite(v)) return "—";
-    const dd = d ?? (v >= 1000 ? 1 : v >= 10 ? 2 : 4);
+    const a = Math.abs(v);
+    const dd = d ?? (a >= 1000 ? 1 : a >= 10 ? 2 : 4);
     return v.toLocaleString("en-US", { minimumFractionDigits: dd, maximumFractionDigits: dd });
   },
   usd(v: number | null | undefined) {

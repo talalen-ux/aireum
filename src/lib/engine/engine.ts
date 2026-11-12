@@ -268,7 +268,7 @@ export class Engine {
       if (c) {
         const lo = Math.floor((price * 0.985) / step), hi = Math.ceil((price * 1.015) / step);
         const vals: number[] = [];
-        for (let i = lo; i <= hi; i++) { const p = i * step; vals.push(((c.bids.get(p) ?? 0) + (c.asks.get(p) ?? 0)) * p); }
+        for (let i = lo; i <= hi; i++) vals.push(((c.bids.get(i) ?? 0) + (c.asks.get(i) ?? 0)) * i * step);
         this.heatCols.push({ t: now, i0: lo, vals, mid: price });
         if (this.heatCols.length > 900) this.heatCols.shift();
       }

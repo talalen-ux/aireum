@@ -218,7 +218,7 @@ export function simulateMarketOrder(book: L2Book, side: "buy" | "sell", usd: num
   };
 }
 
-/** Aggregate many venue books into one consolidated ladder bucketed at `tick` USD. */
+/** Aggregate many venue books into one consolidated ladder bucketed at `tick` USD. Keys are integer bucket indices (price = key·tick). */
 export function consolidate(books: L2Book[], tick: number, rangeBps = 200) {
   const mids = books.map((b) => b.mid()).filter((m): m is number => m !== null);
   if (!mids.length) return null;
@@ -230,8 +230,8 @@ export function consolidate(books: L2Book[], tick: number, rangeBps = 200) {
   const asks = new Map<number, number>();
   for (const b of books) {
     if (!b.valid) continue;
-    for (const [p, q] of b.getBids()) { if (p < lo) break; const k = Math.floor(p / tick) * tick; bids.set(k, (bids.get(k) ?? 0) + q); }
-    for (const [p, q] of b.getAsks()) { if (p > hi) break; const k = Math.ceil(p / tick) * tick; asks.set(k, (asks.get(k) ?? 0) + q); }
+    for (const [p, q] of b.getBids()) { if (p < lo) break; const k = Math.floor(p / tick + 1e-9); bids.set(k, (bids.get(k) ?? 0) + q); }
+    for (const [p, q] of b.getAsks()) { if (p > hi) break; const k = Math.ceil(p / tick - 1e-9); asks.set(k, (asks.get(k) ?? 0) + q); }
   }
   return { mid, bids, asks };
 }

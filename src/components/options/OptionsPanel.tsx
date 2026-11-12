@@ -135,13 +135,15 @@ function Body({ a, asOf, licensing, assumption, setAssumption, horizon, setHoriz
         <Stat label="Dealer charm / day" value={fmt.usd(a.greeks.dealerCharmUsdPerDay)} hint={`hedge flow ${fmt.usd(a.greeks.hedgeFlowPerDay)}`} />
       </div>
 
-      <Section title="Dealer GEX by strike (±20% of spot)" prov="modeled">
-        <GexBars gex={a.gex} spot={a.spot} zeroGamma={zg} maxPain={mp} />
-      </Section>
+      <div className="grid gap-3 xl:grid-cols-2">
+        <Section title="Dealer GEX by strike (±20% of spot)" prov="modeled">
+          <GexBars gex={a.gex} spot={a.spot} zeroGamma={zg} maxPain={mp} />
+        </Section>
 
-      <Section title="Modeled total GEX vs hypothetical spot" prov="modeled">
-        <GexCurve profile={a.profile} spot={a.spot} signed={spec.signed} />
-      </Section>
+        <Section title="Modeled total GEX vs hypothetical spot" prov="modeled">
+          <GexCurve profile={a.profile} spot={a.spot} signed={spec.signed} />
+        </Section>
+      </div>
 
       <div className="grid gap-3 md:grid-cols-2">
         <Section title="ATM IV term structure" prov="modeled">
@@ -248,7 +250,7 @@ function GexBars({ gex, spot, zeroGamma, maxPain }: { gex: GexByStrike; spot: nu
       </g>
     ) : null;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label="Dealer gamma exposure by strike">
+    <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full max-h-[340px]" role="img" aria-label="Dealer gamma exposure by strike">
       <line x1={padL} x2={W - padR} y1={mid} y2={mid} stroke="var(--color-line)" />
       {rows.map((r) => (
         <rect key={r.strike} x={x(r.strike) - bw / 2} width={bw} y={Math.min(mid, y(r.netGex))} height={Math.max(0.5, Math.abs(y(r.netGex) - mid))} fill={r.netGex >= 0 ? "var(--color-bull)" : "var(--color-bear)"} opacity={0.85}>
@@ -280,7 +282,7 @@ function GexCurve({ profile, spot, signed }: { profile: GexProfile; spot: number
   const area = `${d}L${x(sMax)},${y0}L${x(sMin)},${y0}Z`;
   const zg = profile.zeroGamma;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label="Total dealer GEX versus hypothetical spot">
+    <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full max-h-[340px]" role="img" aria-label="Total dealer GEX versus hypothetical spot">
       <defs>
         <clipPath id="gex-above"><rect x={0} y={0} width={W} height={y0} /></clipPath>
         <clipPath id="gex-below"><rect x={0} y={y0} width={W} height={H - y0} /></clipPath>
@@ -320,7 +322,7 @@ function TermChart({ term }: { term: TermPoint[] }) {
   const inverted = pts[0].atmIv > pts[pts.length - 1].atmIv;
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label="ATM implied volatility term structure">
+      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full max-h-[340px]" role="img" aria-label="ATM implied volatility term structure">
         <path d={d} fill="none" stroke="var(--color-model)" strokeWidth={1.75} />
         {pts.map((p, i) => (
           <circle key={p.expiry} cx={x(xs[i])} cy={y(p.atmIv)} r={2.5} fill="var(--color-model)">

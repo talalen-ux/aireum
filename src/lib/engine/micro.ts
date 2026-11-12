@@ -231,11 +231,19 @@ export class ImpactTracker {
 export class LargeTrades {
   private sizes = new RingBuffer(5000);
   readonly tape: { ts: number; venue: Venue; market: MarketType; side: "buy" | "sell"; price: number; usd: number; size: number }[] = [];
-  constructor(readonly floorUsd: number) {}
+  private cached: number;
+  private sinceCalc = 0;
+  constructor(readonly floorUsd: number) {
+    this.cached = floorUsd;
+  }
+  /** max(floor, rolling p99.5) — recomputed every 250 trades, not per trade. */
   threshold() {
     if (this.sizes.length < 500) return this.floorUsd;
-    const arr = this.sizes.toArray().sort((a, b) => a - b);
-    return Math.max(this.floorUsd, arr[Math.floor(arr.length * 0.995)]);
+    if (this.sinceCalc++ % 250 === 0) {
+      const arr = this.sizes.toArray().sort((a, b) => a - b);
+      this.cached = Math.max(this.floorUsd, arr[Math.floor(arr.length * 0.995)]);
+    }
+    return this.cached;
   }
   onTrade(t: TradeEvent) {
     const usd = t.price * t.size;
