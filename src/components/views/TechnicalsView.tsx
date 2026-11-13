@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { Timeframe } from "@/lib/core/types";
 import { useAtlas } from "@/lib/state/store";
 import { aggregateVol } from "@/lib/engine/dvol";
+import { vix2bEventStudy, type HorizonStat } from "@/lib/engine/eventstudy";
 import { detect2B, gannFans, GANN_RATIOS, gannLevel, twoBOutcomes, williamsVixFix, wvfState, type GannFan, type GannScaleMode, type TwoB, type VolBar } from "@/lib/engine/technicals";
 import { PriceChart } from "../charts/PriceChart";
 import { Badge, Card, cn, fmt, ProvTag, Tabs, Unavailable } from "../ui";
@@ -19,6 +20,12 @@ export function TechnicalsView() {
   const snap = useAtlas((s) => s.snap);
   const chartBars = useAtlas((s) => s.chartBars);
   const dvol = useAtlas((s) => s.dvol);
+  const vix = useAtlas((s) => s.vix);
+  const mode = useAtlas((s) => s.mode);
+  const btcDaily = useMemo(() => chartBars["1d"] ?? [], [chartBars]);
+  const vixBars = useMemo(() => (vix?.status === "ok" ? vix.bars : []), [vix]);
+  const vix2B = useMemo(() => (vixBars.length ? detect2B(vixBars.slice(-400)) : []), [vixBars]);
+  const study = useMemo(() => (vixBars.length && btcDaily.length ? vix2bEventStudy(vixBars, btcDaily) : null), [vixBars, btcDaily]);
   const [tf, setTf] = useState<TF>("1h");
   const [scaleMode, setScaleMode] = useState<GannScaleMode>("atr");
   const [fanSel, setFanSel] = useState<"up" | "down" | "both">("both");
@@ -126,6 +133,60 @@ export function TechnicalsView() {
           </div>
         </Card>
       </div>
+
+      <Card title="CBOE VIX 2B → crypto (cross-asset)" subtitle={vix?.status === "ok" ? `${vix.source} · last ${fmt.time(vixBars.at(-1)?.t)} · event study vs ${snap.asset} daily closes` : "Equity fear gauge 2B reversals and what BTC did next"} right={<ProvTag p="observed" />}>
+        {mode !== "live" ? (
+          <Unavailable reason={`real CBOE VIX is only paired with live ${snap.asset} data — switch to Live (mixing a real VIX with ${mode} prices would be meaningless)`} />
+        ) : vix?.status !== "ok" ? (
+          <Unavailable reason={vix ? vix.reason : "loading CBOE VIX…"} />
+        ) : (
+          <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
+            <div>
+              <VolChart series={vixBars.slice(-200)} signals={vix2B} />
+              <div className="mt-1 flex gap-4 text-[11px] tnum"><span>VIX {vixBars.at(-1)!.c.toFixed(2)}</span><span className="text-mute">{vix.ohlc ? "daily OHLC" : "close-only (FRED) — 2B on closes"}</span></div>
+              <h4 className="mt-3 mb-1 text-[10px] uppercase tracking-wider text-dim">Recent VIX 2Bs</h4>
+              <TwoBList list={vix2B.slice(-5).reverse()} digits={2} meaning={(x) => (x.kind === "top" ? "equity fear spike failed → risk-on context for crypto" : "complacency broke → risk-off / vol-expansion risk")} />
+            </div>
+            <div>
+              {study ? (
+                <>
+                  <p className="text-[11px] text-dim mb-2">Sample {new Date(study.sample.from).toISOString().slice(0, 10)} → {new Date(study.sample.to).toISOString().slice(0, 10)} · {study.sample.btcDays} BTC days. Forward {snap.asset} returns after confirmed VIX 2Bs vs all days.</p>
+                  <StudyTable title="VIX 2B top (fear fails) → expect crypto UP" rows={study.top} tone="bull" />
+                  <StudyTable title="VIX 2B bottom (complacency breaks) → expect crypto DOWN" rows={study.bottom} tone="bear" />
+                  <ul className="mt-2 list-disc pl-4 text-[10px] text-mute space-y-0.5">{study.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
+                  <p className="mt-1 text-[10px] text-mute">History depth is limited by the {btcDaily.length} daily bars loaded (Binance limit). For a longer, out-of-sample test use <code>research/</code>.</p>
+                </>
+              ) : <Unavailable reason="needs ≥60 overlapping days of VIX and daily bars" />}
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function StudyTable({ title, rows, tone }: { title: string; rows: HorizonStat[]; tone: "bull" | "bear" }) {
+  return (
+    <div className="mb-3">
+      <h4 className={cn("text-[11px] mb-1", tone === "bull" ? "text-bull" : "text-bear")}>{title}</h4>
+      <table className="w-full text-[11px] tnum">
+        <thead><tr className="text-left text-mute">{["Horizon", "n", "Mean", "Median", "Hit", "Baseline mean", "Baseline hit", "Edge vs baseline", "p (perm.)"].map((h) => <th key={h} className="font-normal pr-2">{h}</th>)}</tr></thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.h} className="border-t border-line/30">
+              <td className="py-0.5">{r.h}d</td>
+              <td className={r.n < 15 ? "text-warn" : ""}>{r.n}</td>
+              <td>{fmt.bps(r.mean, 0)}</td>
+              <td>{fmt.bps(r.median, 0)}</td>
+              <td>{r.hit !== null ? `${Math.round(r.hit * 100)}%` : "—"}</td>
+              <td className="text-mute">{fmt.bps(r.baselineMean, 0)}</td>
+              <td className="text-mute">{r.baselineHit !== null ? `${Math.round(r.baselineHit * 100)}%` : "—"}</td>
+              <td className={(r.edgeBps ?? 0) > 0 ? "text-bull" : "text-bear"}>{fmt.bps(r.edgeBps, 0)}</td>
+              <td className={r.pValue !== null && r.pValue < 0.05 ? "text-bull font-semibold" : "text-dim"}>{r.pValue !== null ? r.pValue.toFixed(3) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

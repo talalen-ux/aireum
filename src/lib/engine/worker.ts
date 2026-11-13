@@ -87,8 +87,14 @@ ctx.onmessage = async (ev: MessageEvent<WorkerIn>) => {
         e.loadHistory(h.bars, { source: h.source, flowAvailable: h.flowAvailable, errors: h.errors });
       }).catch((err) => post({ type: "error", message: `history: ${(err as Error).message}` }));
       const pullDvol = () => fetchDvol(m.asset).then((d) => gen === my && e.setDvol(d));
+      const pullVix = () =>
+        fetch("/api/vix")
+          .then((r) => r.json())
+          .then((v) => gen === my && e.setVix(v))
+          .catch((err) => gen === my && e.setVix({ status: "unavailable", reason: `/api/vix: ${(err as Error).message}`, asOf: Date.now() }));
       pullDvol();
-      dvolTimer = setInterval(pullDvol, 5 * 60_000);
+      pullVix();
+      dvolTimer = setInterval(() => { pullDvol(); pullVix(); }, 5 * 60_000);
     }
     return;
   }

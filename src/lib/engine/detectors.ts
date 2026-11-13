@@ -7,6 +7,7 @@ import type { TfAssessment } from "./regime";
 import type { LiqMap } from "./liqmodel";
 import type { VenueRow, LeadLag } from "./micro";
 import type { DvolResult } from "./dvol";
+import type { VixResult } from "./eventstudy";
 import { aggregateVol } from "./dvol";
 import { detect2B, williamsVixFix, wvfState, type TwoB } from "./technicals";
 
@@ -92,6 +93,7 @@ export interface DetectorContext {
   optionsAvailable: boolean;
   macroAvailable: boolean;
   dvol?: DvolResult | null;
+  vix?: VixResult | null;
 }
 
 type Candidate = Omit<Opportunity, "key" | "firstSeen" | "updated" | "firstPrice" | "state"> & { state?: Lifecycle };
@@ -416,6 +418,7 @@ function vix2BDetector(ctx: DetectorContext): Candidate[] {
   const price = ctx.price;
   if (!price) return out;
   const sources: { tf: Timeframe; series: { t: number; h: number; l: number; c: number }[]; name: string; prov: "observed" | "modeled" }[] = [];
+  if (ctx.vix?.status === "ok") sources.push({ tf: "1d", series: ctx.vix.bars.slice(-400), name: "CBOE VIX (equity fear gauge, cross-asset)", prov: "observed" });
   if (ctx.dvol?.status === "ok") {
     sources.push({ tf: "1h", series: ctx.dvol.h1, name: "DVOL (Deribit implied vol)", prov: "observed" });
     sources.push({ tf: "4h", series: aggregateVol(ctx.dvol.h1, 4), name: "DVOL (Deribit implied vol)", prov: "observed" });
@@ -430,6 +433,7 @@ function vix2BDetector(ctx: DetectorContext): Candidate[] {
     const live = sigs.filter((x) => x.kind === "top" && x.state === "confirmed" && x.barsAgo <= 2).at(-1);
     if (!live) continue;
     const ts = src.series[src.series.length - 1].t;
+    const cross = src.name.startsWith("CBOE");
     const st = src.name.startsWith("Williams") ? wvfState(src.series as never) : null;
     out.push({
       detector: "vix_2b", side: "long", tf: src.tf, strength: 0.55, completeness: src.prov === "observed" ? 1 : 0.75,
@@ -440,11 +444,11 @@ function vix2BDetector(ctx: DetectorContext): Candidate[] {
         ev("Back below swing high", `${live.barsAgo} bar(s) ago`, 1, src.prov, src.name, ts),
         ...(st ? [ev("WVF percentile (500 bars)", `${Math.round(st.percentile * 100)}%`, 0, "modeled", "WVF", ts) as Evidence] : []),
       ],
-      counter: [ev("Vol can re-spike", "a second higher vol high invalidates the 2B", -1, "inferred", "methodology", ts), ev("Equity-VIX heuristic", "transfer to crypto vol is unvalidated", -1, "inferred", "methodology", ts)],
+      counter: [ev("Vol can re-spike", "a second higher vol high invalidates the 2B", -1, "inferred", "methodology", ts), cross ? ev("Cross-asset link varies", "BTC–equity correlation is regime-dependent; see the event study in VIX 2B · Gann", -1, "inferred", "methodology", ts) : ev("Equity-VIX heuristic", "transfer to crypto vol is unvalidated", -1, "inferred", "methodology", ts)],
       zone: null, trigger: null, invalidation: null,
       targets: targetsFor("long", price, ctx.liq),
       analogs: null,
-      assumptions: [`Volatility 2B invalidates if ${src.name} exceeds ${live.invalidation.toFixed(2)}.`, src.prov === "modeled" ? "DVOL unavailable — using the Williams VIX Fix computed from price bars." : "DVOL is Deribit's 30-day implied volatility index."],
+      assumptions: [`Volatility 2B invalidates if ${src.name} exceeds ${live.invalidation.toFixed(2)}.`, cross ? "CBOE VIX daily bars; signal known after the US cash close." : src.prov === "modeled" ? "DVOL unavailable — using the Williams VIX Fix computed from price bars." : "DVOL is Deribit's 30-day implied volatility index."],
     });
   }
   return out;
@@ -468,7 +472,7 @@ export function detectorStatus(ctx: DetectorContext): DetectorStatus[] {
     { id: "macro_shock", available: ctx.macroAvailable, reason: "no licensed macro/news feed connected" },
     { id: "liquidity_vacuum", available: hasBook && ctx.depthHist.length >= 60, reason: "needs ≥60s of live books" },
     { id: "price_2b", available: (ctx.bars["15m"]?.length ?? 0) >= 60 },
-    { id: "vix_2b", available: ctx.dvol?.status === "ok" || (ctx.bars["1h"]?.length ?? 0) >= 80, reason: ctx.dvol?.status === "ok" ? undefined : "DVOL unavailable → Williams VIX Fix fallback" },
+    { id: "vix_2b", available: ctx.vix?.status === "ok" || ctx.dvol?.status === "ok" || (ctx.bars["1h"]?.length ?? 0) >= 80, reason: ctx.dvol?.status === "ok" ? undefined : "DVOL unavailable → Williams VIX Fix fallback" },
   ];
 }
 

@@ -9,6 +9,7 @@ import { evaluateExhaustion, type BookPressure, type ExhaustionSignal, type Anal
 import { buildLiqMap, niceStep, type LiqMap } from "./liqmodel";
 import { ImpactTracker, LargeTrades, Stream, WallTracker, computeLeadLag, sampleStream, streamKey, venueRow, type LeadLag, type VenueRow, type WallInfo } from "./micro";
 import type { DvolResult } from "./dvol";
+import type { VixResult } from "./eventstudy";
 import { OpportunityBook, detectorStatus, refreshAnalogs, runDetectors, type AuditEntry, type DetectorContext, type DetectorStatus, type Opportunity } from "./detectors";
 
 export interface HeatColumn {
@@ -69,6 +70,7 @@ export interface EngineSnapshot {
   recording: boolean;
   recordedEvents: number;
   dvol: DvolResult | null;
+  vix: VixResult | null;
 }
 
 const SPOT_PRIORITY: Venue[] = ["binance", "coinbase", "okx", "bybit", "kraken", "bitfinex", "kucoin", "sim"];
@@ -111,6 +113,12 @@ export class Engine {
   recorded: AnyEvent[] = [];
   dvol: DvolResult | null = null;
   private dvolSentAt = -1;
+  vix: VixResult | null = null;
+  private vixSentAt = -1;
+
+  setVix(v: VixResult) {
+    this.vix = v;
+  }
 
   setDvol(d: DvolResult) {
     this.dvol = d;
@@ -298,7 +306,7 @@ export class Engine {
       this.exh = { long: evaluateExhaustion(src, "long", use1m ? bp : null), short: evaluateExhaustion(src, "short", use1m ? bp : null), tf: use1m ? "1m" : "5m" };
       const venues = this.venueRows(now);
       const ctx: DetectorContext = {
-        now, price, bars1m: this.bars1m.bars, bars: Object.fromEntries(TIMEFRAMES.map((tf) => [tf, this.series[tf].bars])), assess: this.assessments, book: bp, venues, leadLag: this.leadLag, liq: this.liqMap, depthHist: this.depthHist, analogCache: this.analogCache, optionsAvailable: false, macroAvailable: false, dvol: this.dvol,
+        now, price, bars1m: this.bars1m.bars, bars: Object.fromEntries(TIMEFRAMES.map((tf) => [tf, this.series[tf].bars])), assess: this.assessments, book: bp, venues, leadLag: this.leadLag, liq: this.liqMap, depthHist: this.depthHist, analogCache: this.analogCache, optionsAvailable: false, macroAvailable: false, dvol: this.dvol, vix: this.vix,
       };
       this.opp.update(runDetectors(ctx), now, price);
       this.detStatus = detectorStatus(ctx);
@@ -432,7 +440,7 @@ export class Engine {
       asset: this.asset, mode: this.mode, ts: now, sessionStart: this.sessionStart, price, priceSource: this.priceSource(), priceTs: anyLiveTrade.length ? Math.max(...anyLiveTrade) || null : null, change24h,
       venues, liveVenues: venues.filter((v) => v.state === "live").length, totalStreams: venues.length,
       history: this.history, assessments: this.assessments, bars1m: opts.includeChart ? b1.slice(-360) : [],
-      chartBars: opts.includeChart ? Object.fromEntries((["5m", "15m", "1h", "4h", "1d", "1w"] as Timeframe[]).map((tf) => [tf, this.series[tf].bars.slice(-500)])) : {},
+      chartBars: opts.includeChart ? Object.fromEntries((["5m", "15m", "1h", "4h", "1d", "1w"] as Timeframe[]).map((tf) => [tf, this.series[tf].bars.slice(tf === "1d" ? -1000 : -500)])) : {},
       flow: this.flow.slice(-900), venueCvd: [...this.venueCvd.entries()].map(([key, usd]) => ({ key, usd })).sort((a, b) => Math.abs(b.usd) - Math.abs(a.usd)),
       impact: this.impactRes, leadLag: this.leadLag, largeTrades: this.large.tape.slice(0, 40), walls: this.walls.list(now, price), pulledWalls: this.walls.pulled.slice(0, 12),
       liquidations: this.liqs.slice(0, 60), liqTotals: { long5m: ago(300_000, "long"), short5m: ago(300_000, "short"), long1h: ago(3_600_000, "long"), short1h: ago(3_600_000, "short") },
@@ -440,6 +448,7 @@ export class Engine {
       heat: { step: this.heatStep ?? 0, cols }, bookPressure: this.bookPressure(), aggDepth: this.aggDepth(), oiTotalUsd: this.oiTotalUsd(), fundingAvg8h: this.fundingAvg(),
       atr1m: atr(b1, 14), atr5m: atr(this.series["5m"].bars, 14), returns1m: rets, eventsPerSec: this.evRate, recording: this.recording, recordedEvents: this.recorded.length,
       dvol: this.dvolPayload(opts.includeChart),
+      vix: this.vix && (opts.includeChart || this.vix.asOf !== this.vixSentAt) ? ((this.vixSentAt = this.vix.asOf), this.vix) : null,
     };
   }
 }
