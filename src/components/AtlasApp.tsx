@@ -11,12 +11,13 @@ import { FlowView } from "./views/FlowView";
 import { RadarView } from "./views/RadarView";
 import { TechnicalsView } from "./views/TechnicalsView";
 import { HarvestView } from "./views/HarvestView";
+import { ConvictionView } from "./views/ConvictionView";
 import { AnalystView } from "./views/AnalystView";
 import { MacroView } from "./views/MacroView";
 import { JournalView } from "./views/JournalView";
 import { SystemView } from "./views/SystemView";
 import { cn } from "./ui";
-import { Activity, BookOpen, Bot, Crosshair, Gauge, Globe2, HandCoins, Layers, Radar, Sigma, TrendingUpDown, Waves, type LucideIcon } from "lucide-react";
+import { Activity, BookOpen, Bot, Crosshair, Gauge, Globe2, HandCoins, Target, Layers, Radar, Sigma, TrendingUpDown, Waves, type LucideIcon } from "lucide-react";
 
 const OptionsPanel = dynamic(() => import("./options/OptionsPanel"), { ssr: false });
 const TradeLab = dynamic(() => import("./trade-lab/TradeLab"), { ssr: false });
@@ -30,6 +31,7 @@ const NAV: { id: View; label: string; icon: LucideIcon; key: string }[] = [
   { id: "options", label: "Options", icon: Sigma, key: "5" },
   { id: "tradelab", label: "Trade Lab", icon: Crosshair, key: "6" },
   { id: "harvest", label: "Profit Harvesting", icon: HandCoins, key: "h" },
+  { id: "conviction", label: "High-Conviction", icon: Target, key: "c" },
   { id: "analyst", label: "Analyst", icon: Bot, key: "7" },
   { id: "macro", label: "Macro", icon: Globe2, key: "8" },
   { id: "journal", label: "Journal", icon: BookOpen, key: "9" },
@@ -81,6 +83,7 @@ export default function AtlasApp() {
           {view === "radar" && <RadarView />}
           {view === "technicals" && <TechnicalsView />}
           {view === "harvest" && <HarvestView />}
+          {view === "conviction" && <ConvictionView />}
           {view === "options" && <OptionsPanel asset={asset} spot={snap?.price ?? null} mode={mode} />}
           {view === "tradelab" && <TradeLab asset={asset} markPrice={snap?.price ?? null} atr={snap?.atr5m ?? null} returns={snap?.returns1m} mode={mode} />}
           {view === "analyst" && <AnalystView />}

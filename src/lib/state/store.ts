@@ -7,7 +7,7 @@ import type { Bar } from "../engine/bars";
 import type { DvolResult } from "../engine/dvol";
 import type { VixResult } from "../engine/eventstudy";
 
-export type View = "command" | "liquidity" | "flow" | "radar" | "technicals" | "harvest" | "options" | "tradelab" | "analyst" | "macro" | "journal" | "system";
+export type View = "command" | "liquidity" | "flow" | "radar" | "technicals" | "harvest" | "conviction" | "options" | "tradelab" | "analyst" | "macro" | "journal" | "system";
 
 interface State {
   asset: Asset;
